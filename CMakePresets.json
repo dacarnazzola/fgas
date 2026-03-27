@@ -8,8 +8,19 @@
   "configurePresets": [
     {
       "name": "debug",
-      "displayName": "gfortran DEBUG",
-      "description": "debug options for building with gfortran",
+      "displayName": "gfortran DEBUG (multi-threaded)",
+      "description": "parallel (default) debug options for building with gfortran",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_Fortran_COMPILER": "gfortran",
+        "CMAKE_Fortran_FLAGS": "-O0 -fopenmp -g -Wall -Wextra -Werror -std=f2018 -pedantic -fmax-errors=1 -fcheck=all -fbacktrace -D__COMPILE_FOR_DEBUG__"
+      }
+    },
+    {
+      "name": "debug-st",
+      "displayName": "gfortran DEBUG (single-threaded)",
+      "description": "single-threaded debug options for building with gfortran",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
@@ -25,18 +36,8 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_Fortran_COMPILER": "gfortran",
-        "CMAKE_Fortran_FLAGS": "-Ofast -march=native -flto -fwhole-program"
-      }
-    },
-    {
-      "name": "parallel",
-      "displayName": "gfortran PARALLEL",
-      "description": "optimized parallel options for building with gfortran",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
-      "cacheVariables": {
-        "CMAKE_Fortran_COMPILER": "gfortran",
-        "CMAKE_Fortran_FLAGS": "-Ofast -march=native -flto -fwhole-program -fopenmp -g -fbacktrace"
+        "CMAKE_Fortran_FLAGS": "-Ofast -march=native -fopenmp",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "TRUE"
       }
     }
   ]

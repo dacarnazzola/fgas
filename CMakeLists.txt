@@ -2,7 +2,19 @@
 cmake_minimum_required(VERSION 3.24)
 
 # set the project name
-project(dbase VERSION 0.0 LANGUAGES Fortran)
+project(ga_lib VERSION 0.0 LANGUAGES Fortran)
+
+# validate LTO settings
+if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT ipo_output)
+    if(ipo_supported)
+        message(STATUS "Link-Time Optimization Enabled")
+    else()
+        message(WARNING "Link-Time Optimization Not Supported by Compiler: ${ipo_output}")
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+    endif()
+endif()
 
 # executables will be built and placed in bin/ directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
