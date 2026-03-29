@@ -25,7 +25,11 @@ contains
             x_avg = real(x_avg_opt, kind=dp)
         else
             inv_n = 1.0_dp/real(nx, kind=dp)
-            x_avg = sum(real(x, kind=dp), dim=2)*inv_n
+            x_avg = 0.0_dp
+            do i=1_i32,nx
+                x_avg = x_avg + real(x(:,i), kind=dp)
+            end do
+            x_avg = x_avg*inv_n
         end if
         do concurrent (i=1_i32:nx)
             x_centered(:,i) = real(x(:,i), kind=dp) - x_avg

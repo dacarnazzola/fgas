@@ -24,7 +24,6 @@ contains
         integer(kind=i32), intent(in), optional :: k_opt
         integer(kind=i32) :: k, i, t1_start, t1_end, t2_start, t2_end
         integer(kind=i32), allocatable :: tournaments(:,:)
-        real(kind=sp), allocatable :: tournament_fitness(:)
         call debug_error_condition(size(population,dim=2,kind=i64) > huge(1_i32), &
                                    'SELECTION::SELECTION_TOURNAMENT population is too large for i32 storage')
         call debug_error_condition(size(population,dim=2) /= size(fitness), &
@@ -40,13 +39,11 @@ contains
         t1_end = k
         t2_start = k + 1_i32
         t2_end = 2_i32*k
-        allocate(tournaments(2_i32*k,size(population,dim=2,kind=i32)))
+        allocate(tournaments(2_i32*k,size(population,dim=2)))
         call random_uniform_i32(tournaments, size(tournaments, kind=i32), 1_i32, size(population, dim=2, kind=i32))
-        allocate(tournament_fitness(2_i32*k))
-        do i=1_i32,size(population, dim=2, kind=i32)
-            tournament_fitness = fitness(tournaments(:,i))
-            selected_pairs_ii(1,i) = tournaments(minloc(tournament_fitness(t1_start:t1_end), dim=1),i)
-            selected_pairs_ii(2,i) = tournaments(minloc(tournament_fitness(t2_start:t2_end), dim=1)+k,i)
+        do concurrent (i=1_i32:size(population, dim=2))
+            selected_pairs_ii(1,i) = tournaments(minloc(fitness(tournaments(t1_start:t1_end,i)), dim=1),i)
+            selected_pairs_ii(2,i) = tournaments(minloc(fitness(tournaments(t2_start:t2_end,i)), dim=1)+k,i)
         end do
     end subroutine selection_tournament
 
