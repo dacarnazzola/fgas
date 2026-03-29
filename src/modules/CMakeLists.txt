@@ -3,7 +3,8 @@ set(MODULE_FILES
     kinds.f90
     constants.f90
     system.f90
+    random.f90
    )
 
 # compile module source code files to lib_modules
-add_library(lib_modules STATIC ${MODULE_FILES})
+add_library(lib_modules OBJECT ${MODULE_FILES})
