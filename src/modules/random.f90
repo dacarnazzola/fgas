@@ -4,7 +4,7 @@ use, non_intrinsic :: constants, only: twopi_dp
 use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
-public :: random_uniform_i32, random_normal_sp, random_normal_multi
+public :: random_uniform_i32, random_normal_sp, random_normal_dp, random_normal_multi
 
     interface random_normal_multi
         module procedure :: random_normal_multi_2d_sp
@@ -38,10 +38,10 @@ contains
         mu_dp = real(mu, kind=dp)
         sig_dp = real(sig, kind=dp)
         do concurrent (i=1_i32:n_2)
-            r = sqrt(-2.0_dp*log(1.0_dp - u(i)))
+            r = sig_dp*sqrt(-2.0_dp*log(1.0_dp - u(i)))
             theta = twopi_dp*u(i+n_2)
-            x_dp(i) = mu_dp + sig_dp*r*cos(theta)
-            x_dp(i+n_2) = mu_dp + sig_dp*r*sin(theta)
+            x_dp(i) = mu_dp + r*cos(theta)
+            x_dp(i+n_2) = mu_dp + r*sin(theta)
         end do
         if (mod(n, 2_i32) /= 0_i32) then
             call random_number(u(1:2))
@@ -50,11 +50,36 @@ contains
         x = real(x_dp, kind=sp)
     end subroutine random_normal_sp
 
+    impure subroutine random_normal_dp(x, n, mu, sig)
+        integer(kind=i32), intent(in) :: n
+        real(kind=dp), intent(out) :: x(n)
+        real(kind=dp), intent(in) :: mu, sig
+        real(kind=dp) :: u(n), r, theta
+        integer(kind=i32) :: n_2, i
+        call debug_error_condition(int(n, kind=i64) > huge(1_i32), &
+                                   'RANDOM::RANDOM_NORMAL_SP supplied n too large for i32 storage')
+        call random_number(u)
+        n_2 = n/2_i32
+        do concurrent (i=1_i32:n_2)
+            r = sig*sqrt(-2.0_dp*log(1.0_dp - u(i)))
+            theta = twopi_dp*u(i+n_2)
+            x(i) = mu + r*cos(theta)
+            x(i+n_2) = mu + r*sin(theta)
+        end do
+        if (mod(n, 2_i32) /= 0_i32) then
+            call random_number(u(1:2))
+            x(n) = mu + sig*sqrt(-2.0_dp*log(1.0_dp-u(1)))*cos(twopi_dp*u(2))
+        end if
+    end subroutine random_normal_dp
+
     impure subroutine random_normal_multi_2d_sp(x, mu, cholesky_factor)
         real(kind=sp), intent(out) :: x(:,:)
         real(kind=sp), intent(in) :: mu(:), cholesky_factor(:,:)
+        real(kind=dp), allocatable :: z(:,:), x_dp(:,:), cholesky_factor_dp(:,:)
         integer(kind=i32) :: i
-        call debug_error_condition((size(x, dim=1, kind=i64) > huge(1_i32)) .or. (size(x, dim=2, kind=i64) > huge(1_i32)), &
+        call debug_error_condition((size(x, dim=1, kind=i64) > huge(1_i32)) .or. &
+                                   (size(x, dim=2, kind=i64) > huge(1_i32)) .or. &
+                                   (size(x, kind=i64) > huge(1_i32)), &
                                    'RANDOM::RANDOM_NORMAL_MULTI_2D_SP supplied x too large for i32 storage')
         call debug_error_condition(size(x, dim=1) /= size(mu), &
                                    'RANDOM::RANDOM_NORMAL_MULTI_2D_SP mu does not match x dimensions')
@@ -65,6 +90,16 @@ contains
                                    'RANDOM::RANDOM_NORMAL_MULTI_2D_SP Cholesky factor must be square matrix')
         call debug_error_condition(any([(cholesky_factor(i,i), i=1,size(cholesky_factor,dim=1))] < 0.0_sp), &
                                    'RANDOM::RANDOM_NORMAL_MULTI_2D_SP Cholesky factor malformed with negative diagonal')
+        allocate(z(size(x,dim=1),size(x,dim=2)), &
+                 x_dp(size(x,dim=1),size(x,dim=2)), &
+                 cholesky_factor_dp(size(cholesky_factor,dim=1),size(cholesky_factor,dim=2)))
+        call random_normal_dp(z, size(z, kind=i32), 0.0_dp, 1.0_dp)
+        cholesky_factor_dp = real(cholesky_factor, kind=dp)
+        x_dp = matmul(cholesky_factor_dp, z)
+        do concurrent (i=1_i32:size(x, dim=2))
+            x_dp(:,i) = x_dp(:,i) + mu
+        end do
+        x = real(x_dp, kind=sp)
     end subroutine random_normal_multi_2d_sp
 
 end module random
