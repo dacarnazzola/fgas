@@ -29,7 +29,7 @@ contains
         integer(kind=i32), intent(in) :: n
         real(kind=sp), intent(out) :: x(n)
         real(kind=sp), intent(in) :: mu, sig
-        real(kind=dp) :: x_dp(n), u(n), r, theta, mu_dp, sig_dp
+        real(kind=dp) :: x_dp(n), u(n), mu_dp, sig_dp
         integer(kind=i32) :: n_2, i
         call debug_error_condition(int(n, kind=i64) > huge(1_i32), &
                                    'RANDOM::RANDOM_NORMAL_SP supplied n too large for i32 storage')
@@ -38,10 +38,15 @@ contains
         mu_dp = real(mu, kind=dp)
         sig_dp = real(sig, kind=dp)
         do concurrent (i=1_i32:n_2)
-            r = sig_dp*sqrt(-2.0_dp*log(1.0_dp - u(i)))
-            theta = twopi_dp*u(i+n_2)
-            x_dp(i) = mu_dp + r*cos(theta)
-            x_dp(i+n_2) = mu_dp + r*sin(theta)
+            block
+                real(kind=dp) :: r, theta
+
+                r = sig_dp*sqrt(-2.0_dp*log(1.0_dp - u(i)))
+                theta = twopi_dp*u(i+n_2)
+
+                x_dp(i) = mu_dp + r*cos(theta)
+                x_dp(i+n_2) = mu_dp + r*sin(theta)
+            end block
         end do
         if (mod(n, 2_i32) /= 0_i32) then
             call random_number(u(1:2))
@@ -54,17 +59,22 @@ contains
         integer(kind=i32), intent(in) :: n
         real(kind=dp), intent(out) :: x(n)
         real(kind=dp), intent(in) :: mu, sig
-        real(kind=dp) :: u(n), r, theta
+        real(kind=dp) :: u(n)
         integer(kind=i32) :: n_2, i
         call debug_error_condition(int(n, kind=i64) > huge(1_i32), &
                                    'RANDOM::RANDOM_NORMAL_SP supplied n too large for i32 storage')
         call random_number(u)
         n_2 = n/2_i32
         do concurrent (i=1_i32:n_2)
-            r = sig*sqrt(-2.0_dp*log(1.0_dp - u(i)))
-            theta = twopi_dp*u(i+n_2)
-            x(i) = mu + r*cos(theta)
-            x(i+n_2) = mu + r*sin(theta)
+            block
+                real(kind=dp) :: r, theta
+
+                r = sig*sqrt(-2.0_dp*log(1.0_dp - u(i)))
+                theta = twopi_dp*u(i+n_2)
+
+                x(i) = mu + r*cos(theta)
+                x(i+n_2) = mu + r*sin(theta)
+            end block
         end do
         if (mod(n, 2_i32) /= 0_i32) then
             call random_number(u(1:2))
