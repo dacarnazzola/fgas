@@ -32,7 +32,7 @@ contains
         real(kind=dp), intent(in) :: lo, hi
         real(kind=dp) :: hi_lo
         call debug_error_condition(int(n, kind=i64) > huge(1_i32), &
-                                   'RANDOM::RANDOM_UNIFORM_I32 supplied n too large for i32 storage')
+                                   'RANDOM::RANDOM_UNIFORM_DP supplied n too large for i32 storage')
         call random_number(x)
         hi_lo = hi - lo
         x = x*hi_lo + lo
@@ -133,16 +133,16 @@ contains
         call debug_error_condition((size(x, dim=1, kind=i64) > huge(1_i32)) .or. &
                                    (size(x, dim=2, kind=i64) > huge(1_i32)) .or. &
                                    (size(x, kind=i64) > huge(1_i32)), &
-                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_SP supplied x too large for i32 storage')
+                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_DP supplied x too large for i32 storage')
         call debug_error_condition(size(x, dim=1) /= size(mu), &
-                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_SP mu does not match x dimensions')
+                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_DP mu does not match x dimensions')
         call debug_error_condition((size(x, dim=1) /= size(cholesky_factor, dim=1)) .or. &
                                    (size(x, dim=1) /= size(cholesky_factor, dim=2)), &
-                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_SP Cholesky factor does not match x dimensions')
+                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_DP Cholesky factor does not match x dimensions')
         call debug_error_condition(size(cholesky_factor, dim=1) /= size(cholesky_factor, dim=2), &
-                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_SP Cholesky factor must be square matrix')
+                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_DP Cholesky factor must be square matrix')
         call debug_error_condition(any([(cholesky_factor(i,i), i=1,size(cholesky_factor, dim=1))] < 0.0_dp), &
-                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_SP Cholesky factor malformed with negative diagonal')
+                                   'RANDOM::RANDOM_NORMAL_MULTI_2D_DP Cholesky factor malformed with negative diagonal')
         allocate(z(size(x,dim=1),size(x,dim=2)))
         call random_normal_dp(z, size(z, kind=i32), 0.0_dp, 1.0_dp)
         x = matmul(cholesky_factor, z)

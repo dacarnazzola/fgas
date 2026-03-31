@@ -39,9 +39,9 @@ contains
         t1_end = k
         t2_start = k + 1_i32
         t2_end = 2_i32*k
-        allocate(tournaments(2_i32*k,size(selected_ii,dim=2)))
+        allocate(tournaments(2_i32*k,size(selected_pairs_ii,dim=2)))
         call random_uniform_i32(tournaments, size(tournaments, kind=i32), 1_i32, size(population, dim=2, kind=i32))
-        do concurrent (i=1_i32:size(selected_ii, dim=2))
+        do concurrent (i=1_i32:size(selected_pairs_ii, dim=2))
             selected_pairs_ii(1,i) = tournaments(minloc(fitness(tournaments(t1_start:t1_end,i)), dim=1),i)
             selected_pairs_ii(2,i) = tournaments(minloc(fitness(tournaments(t2_start:t2_end,i)), dim=1)+k,i)
         end do
