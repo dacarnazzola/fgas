@@ -65,7 +65,7 @@ contains
             call cholesky_decomposition(chol, cov)
 
             ! Gaussian mutation based on post-crossover population genetic covariance, mutation_rate=0.01
-            call perform_mutation(new_population(:,1:population_size-1), 0.2, chol, sqrt(0.01*2*5.12))
+            call perform_mutation(new_population(:,1:population_size-1), 0.2, chol, 0.01*2*5.12)
 
             ! calculate fitness
             call rastrigin(new_population, fitness)
@@ -92,6 +92,6 @@ program main
 use benchmark
 implicit none
 
-    call solve_rastrigin(20, 10, 2000)
+    call solve_rastrigin(10, 10, 100)
 
 end program main
