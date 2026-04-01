@@ -4,7 +4,7 @@ use, non_intrinsic :: constants, only: twopi_dp
 use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
-public :: random_uniform_i32, random_uniform_dp, random_normal_sp, random_normal_dp, random_normal_multi
+public :: random_uniform_i32, random_uniform_sp, random_uniform_dp, random_normal_sp, random_normal_dp, random_normal_multi
 
     interface random_normal_multi
         module procedure :: random_normal_multi_2d_sp
@@ -25,6 +25,20 @@ contains
         hi_lo = real(int(hi, kind=i64) - lo_i64 + 1_i64, kind=dp)
         x = int(int(work*hi_lo, kind=i64) + lo_i64, kind=i32)
     end subroutine random_uniform_i32
+
+    impure subroutine random_uniform_sp(x, n, lo, hi)
+        integer(kind=i32), intent(in) :: n
+        real(kind=sp), intent(out) :: x(n)
+        real(kind=sp), intent(in) :: lo, hi
+        real(kind=dp) :: hi_lo, work(n), lo_dp
+        call debug_error_condition(int(n, kind=i64) > huge(1_i32), &
+                                   'RANDOM::RANDOM_UNIFORM_SP supplied n too large for i32 storage')
+        call random_number(work)
+        lo_dp = real(lo, kind=dp)
+        hi_lo = real(hi, kind=dp) - lo_dp
+        work = work*hi_lo + lo_dp
+        x = real(work, kind=sp)
+    end subroutine random_uniform_sp
 
     impure subroutine random_uniform_dp(x, n, lo, hi)
         integer(kind=i32), intent(in) :: n
