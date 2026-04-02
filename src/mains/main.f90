@@ -54,7 +54,7 @@ contains
         call rastrigin(current_population, fitness)
         elite_ii = minloc(fitness, dim=1)
         write(stdout,'(a,f0.6)') 'initial best fitness: ',fitness(elite_ii)
-        ft = fitness(elite_ii)
+        ft = sum(fitness)
 
         ! set regularization vector as (domain/12)**2, this ensures minimum sigma on mutation Cholesky factor of domain/12
         regularization_vector = ((domain_ub - domain_lb)/12.0_rk)**2_ik
@@ -75,7 +75,7 @@ contains
             call apply_constraints(new_population, domain_lb, domain_ub)
 
             ! calculate covariance matrix and Cholesky factor for mutation
-            call covariance(cov, new_population, reg_vec_opt=regularization_vector)
+            call covariance(cov, current_population, reg_vec_opt=regularization_vector)
             call cholesky_decomposition(chol, cov)
 
             ! Gaussian mutation based on post-crossover population genetic covariance
@@ -86,13 +86,13 @@ contains
             call rastrigin(new_population, fitness)
             elite_ii = minloc(fitness, dim=1)
             write(stdout,'(a,i0,a,f0.6)') 'generation: ',generation,', best fitness: ',fitness(elite_ii)
-            ft_new = fitness(elite_ii)
+            ft_new = sum(fitness)
 
             if (ft_new < ft) then
                 mutation_scale = max(0.5_rk*mutation_scale, 0.5_rk)
                 failed_gen = 0
             else
-                mutation_scale = 1.2_rk*mutation_scale
+                mutation_scale = 1.1_rk*mutation_scale
                 failed_gen = failed_gen + 1
             end if
 
@@ -111,8 +111,8 @@ contains
                 call rastrigin(new_population(:,1:population_size-1), fitness(1:population_size-1))
                 elite_ii = minloc(fitness, dim=1)
                 write(stdout,'(a,i0,a,f0.6)') 'CATASTROPHE generation: ',generation,', best fitness: ',fitness(elite_ii)
-                ft = fitness(elite_ii)
-                mutation_scale = 2.0_rk ! reset mutation_scale to within bounds
+                ft = sum(fitness)
+                mutation_scale = 1.0_rk ! reset mutation_scale to 1.0 for randomized population
                 failed_gen = 0
             end if
 
@@ -136,9 +136,9 @@ program main
 use benchmark
 implicit none
 
-    integer(ik), parameter :: problem_dimension = 20, &
-                              population_size = 100, &
-                              maximum_generations = 100
+    integer(ik), parameter :: problem_dimension = 100, &
+                              population_size = 200, &
+                              maximum_generations = 20
 
     call solve_rastrigin(problem_dimension, population_size, maximum_generations)
 
