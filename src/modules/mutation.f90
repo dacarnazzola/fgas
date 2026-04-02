@@ -8,10 +8,11 @@ public :: mutation_covariance_aware_gaussian
 
 contains
 
-    impure subroutine mutation_covariance_aware_gaussian(population, mutation_rate, cholesky_factor, min_diagonal)
+    impure subroutine mutation_covariance_aware_gaussian(population, mutation_rate, cholesky_factor, mutation_scale)
         real(kind=sp), intent(inout) :: population(:,:)
-        real(kind=sp), intent(in) :: mutation_rate, cholesky_factor(:,:), min_diagonal
+        real(kind=sp), intent(in) :: mutation_rate, cholesky_factor(:,:), mutation_scale
         real(kind=dp), allocatable :: do_mutate(:), mutation_magnitude(:,:), cholesky_factor_dp(:,:), zeros(:)
+        real(kind=dp) :: mutation_scale_dp
         integer(kind=i32), allocatable :: mutate_ii(:)
         logical(kind=bool), allocatable :: pass_mutate(:)
         integer(kind=i32) :: i, num_mutate
@@ -37,15 +38,14 @@ contains
                      mutation_magnitude(size(population, dim=1),num_mutate), &
                      cholesky_factor_dp(size(cholesky_factor, dim=1),size(cholesky_factor, dim=2)), &
                      zeros(size(population, dim=1)))
+            mutation_scale_dp = real(mutation_scale, kind=dp)
             cholesky_factor_dp = real(cholesky_factor, kind=dp)
-            do concurrent (i=1_i32:size(cholesky_factor, dim=1))
-                cholesky_factor_dp(i,i) = max(cholesky_factor_dp(i,i), real(min_diagonal, kind=dp))
-            end do
             zeros = 0.0_dp
             mutate_ii = pack([(i, i=1,size(pass_mutate))], pass_mutate)
             call random_normal_multi(mutation_magnitude, zeros, cholesky_factor_dp)
             do concurrent (i=1_i32:num_mutate)
-                population(:,mutate_ii(i)) = real(real(population(:,mutate_ii(i)), kind=dp) + mutation_magnitude(:,i), kind=sp)
+                population(:,mutate_ii(i)) = real(real(population(:,mutate_ii(i)), kind=dp) + &
+                                                  mutation_scale_dp*mutation_magnitude(:,i), kind=sp)
             end do
         end if
     end subroutine mutation_covariance_aware_gaussian

@@ -3,14 +3,14 @@ use, non_intrinsic :: kinds, only: i32, i64, sp, dp
 use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
-public :: cov, chol
+public :: cov, chol, constraints_reflective_boundary
 
 contains
 
-    pure subroutine cov(c, x, x_avg_opt)
-        real(kind=sp), intent(in) :: x(:,:)
+    pure subroutine cov(c, x, x_avg_opt, reg_vec_opt)
+        real(kind=sp), intent(in), contiguous :: x(:,:)
         real(kind=sp), intent(out) :: c(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
-        real(kind=sp), intent(in), optional :: x_avg_opt(:)
+        real(kind=sp), intent(in), contiguous, optional :: x_avg_opt(:), reg_vec_opt(:)
         real(kind=dp) :: x_avg(size(x, dim=1, kind=i64)), x_centered(size(x, dim=1, kind=i64),size(x, dim=2, kind=i64)), &
                          c_dp(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64)), inv_n, inv_n_1
         integer(kind=i32) :: nx, i
@@ -36,11 +36,16 @@ contains
         end do
         inv_n_1 = 1.0_dp/real(nx - 1_i32, kind=dp)
         c_dp = matmul(x_centered, transpose(x_centered))*inv_n_1
+        if (present(reg_vec_opt)) then
+            do concurrent (i=1_i32:size(c_dp, dim=1))
+                c_dp(i,i) = c_dp(i,i) + real(reg_vec_opt(i), kind=dp)
+            end do
+        end if
         c = real(c_dp, kind=sp)
     end subroutine cov
 
     pure subroutine chol(l, a)
-        real(kind=sp), intent(in) :: a(:,:)
+        real(kind=sp), intent(in), contiguous :: a(:,:)
         real(kind=sp), intent(out) :: l(size(a, dim=1, kind=i64),size(a, dim=2, kind=i64))
         real(kind=dp) :: a_dp(size(a, dim=1, kind=i64),size(a, dim=2, kind=i64)), &
                          l_dp(size(a, dim=1, kind=i64),size(a, dim=2, kind=i64)), current_diagonal, sqrt_diag
@@ -68,5 +73,24 @@ contains
         end do
         l = real(l_dp, kind=sp)
     end subroutine chol
+
+    pure subroutine constraints_reflective_boundary(x, lo, hi)
+        real(kind=sp), intent(inout), contiguous :: x(:,:)
+        real(kind=sp), intent(in), contiguous :: lo(:), hi(:)
+        real(kind=dp) :: width(size(x,dim=1)), lo_dp(size(lo)), hi_dp(size(hi))
+        integer :: i
+        hi_dp = real(hi, kind=dp)
+        lo_dp = real(lo, kind=dp)
+        width = hi_dp - lo_dp
+        where (abs(width) < 1.0e-30_dp) width = tiny(1.0_dp)
+        do concurrent (i=1:size(x,dim=2))
+            block
+                real(kind=dp) :: t(size(x,dim=1))
+
+                t = modulo(real(x(:,i), kind=dp) - lo_dp, 2*width)
+                x(:,i) = real(merge(lo_dp + t, hi_dp - (t - width), t <= width), kind=sp)
+            end block
+        end do
+    end subroutine constraints_reflective_boundary
 
 end module util
