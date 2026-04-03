@@ -156,21 +156,16 @@ contains
             else
                 mutation_scale = min(2.0_rk*mutation_scale, 3.0_rk)
             end if
+            ft = ft_new
 
-            if (abs(fitness(1) - fitness(population_size))/fitness(1) < 0.1_rk) population_ok = .false.
+            if (abs(fitness(1) - fitness(population_size))/fitness(1) < 0.01_rk) population_ok = .false.
 
-            if (population_ok) then
-                ft = ft_new
-            else ! elite 1 failing to improve, reset search space
-                chol = 0.0_rk
-                do concurrent (i=1:problem_dimension)
-                    cov(i,i) = cov(i,i)*2.0_rk
-                    chol(i,i) = abs(domain_ub(i) - domain_lb(i))/2.0_rk
-                end do
+            if (.not.population_ok) then
                 do concurrent (i=catastrophe_pop_start:population_size)
                     new_population(:,i) = new_population(:,1)
                 end do
-                call perform_mutation(new_population(:,catastrophe_pop_start:population_size), 1.0_rk, chol, 1.0_rk)
+                mutation_scale = min(mutation_scale*10.0_rk, 1.0_rk) ! reset mutation_scale to 1.0 for randomized population
+                call perform_mutation(new_population(:,catastrophe_pop_start:population_size), 1.0_rk, chol, mutation_scale)
                 call apply_constraints(new_population(:,catastrophe_pop_start:population_size), domain_lb, domain_ub)
                 call evaluate_function(new_population(:,catastrophe_pop_start:population_size), &
                                        fitness(catastrophe_pop_start:population_size))
@@ -180,8 +175,8 @@ contains
                 elite_ii = 1
                 ft = fitness(elite_ii)
                 write(stdout,'(a,i0,a,f0.6)') 'CATASTROPHE generation: ',generation,', best fitness: ',ft
-                mutation_scale = 1.0_rk ! reset mutation_scale to 1.0 for randomized population
                 cov_learning_rate = 0.05_rk ! reset cov_learning_rate to 0.5 for randomized population
+                population_ok = .true.
             end if
 
             if (ft < 1.0e-6) exit
