@@ -13,7 +13,7 @@ public :: stdout, ik, rk
 public :: twopi
 public :: covariance, cholesky_decomposition, sort_candidates, apply_constraints, random_uniform
 public :: perform_selection, perform_crossover, perform_mutation
-public :: rastrigin
+public :: rastrigin, rosenbrock
 contains
     pure subroutine rastrigin(x, fx)
         real(rk), intent(in) :: x(:,:)
@@ -25,10 +25,20 @@ contains
             fx(i) = 10.0_rk*xdim + sum(x(:,i)*x(:,i) - 10.0_rk*cos(twopi*x(:,i)), dim=1)
         end do
     end subroutine rastrigin
+    pure subroutine rosenbrock(x, fx)
+        real(rk), intent(in) :: x(:,:)
+        real(rk), intent(out) :: fx(:)
+        integer :: i, xdim, nx
+        xdim = size(x, dim=1)
+        nx = size(x, dim=2)
+        do concurrent (i=1:nx)
+            fx(i) = sum(100.0_rk*(x(2:xdim,i) - x(1:xdim-1,i)**2)**2 + (1.0_rk - x(1:xdim-1,i))**2, dim=1)
+        end do
+    end subroutine rosenbrock
 end module ga_interface                                                           
 
 module benchmark
-use, non_intrinsic :: ga_interface, evaluate_function=>rastrigin
+use, non_intrinsic :: ga_interface, evaluate_function=>rosenbrock
 implicit none
 private
 public :: ik, solve
@@ -53,8 +63,8 @@ contains
                  selected_pairs_ii(2,population_size), candidate_sorted_ii(2*population_size))
 
         ! initialize population
-        domain_lb = -5.12_rk
-        domain_ub = 5.12_rk
+        domain_lb = -5.0_rk ! -5.12 for rastrigin
+        domain_ub = 10.0_rk ! 5.12 for rastrigin
         call random_uniform(pop1, size(pop1), minval(domain_lb), maxval(domain_ub))
         current_population => pop1
         new_population => pop2
@@ -161,8 +171,8 @@ use benchmark
 implicit none
 
     integer(ik), parameter :: problem_dimension   = 200
-    integer(ik), parameter :: population_size     = 4000
-    integer(ik), parameter :: maximum_generations = 5 * 250
+    integer(ik), parameter :: population_size     = 2000
+    integer(ik), parameter :: maximum_generations = 2000
 
     call solve(problem_dimension, population_size, maximum_generations)
 
