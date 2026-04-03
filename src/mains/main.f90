@@ -48,19 +48,20 @@ contains
     impure subroutine solve(problem_dimension, population_size, maximum_generations)
         integer(ik), intent(in) :: problem_dimension, population_size, maximum_generations
         real(rk), allocatable :: fitness(:), cov(:,:), chol(:,:), baseline(:,:), baseline_fitness(:), domain_lb(:), domain_ub(:), &
-                                 regularization_vector(:), candidates(:,:), candidate_fitness(:)
+                                 regularization_vector(:), candidates(:,:), candidate_fitness(:), new_cov(:,:)
         real(rk), allocatable, target :: pop1(:,:), pop2(:,:)
         real(rk), pointer :: current_population(:,:), new_population(:,:), dummy_ptr(:,:)
-        real(rk) :: mutation_rate, mutation_scale, ft, ft_new
+        real(rk) :: mutation_rate, mutation_scale, ft, ft_new, cov_learning_rate, offspring_success
         integer(ik), allocatable :: selected_pairs_ii(:,:), candidate_sorted_ii(:)
-        integer(ik) :: generation, elite_ii, failed_gen, i, total_evals
+        integer(ik) :: generation, elite_ii, failed_gen, i, total_evals, tournament_k, catastrophe_pop_start
 
         !allocate arrays
         allocate(fitness(population_size), cov(problem_dimension,problem_dimension), chol(problem_dimension,problem_dimension), &
                  domain_lb(problem_dimension), domain_ub(problem_dimension), regularization_vector(problem_dimension), &
                  candidates(problem_dimension,2*population_size), candidate_fitness(2*population_size), &
                  pop1(problem_dimension,population_size), pop2(problem_dimension,population_size), &
-                 selected_pairs_ii(2,population_size), candidate_sorted_ii(2*population_size))
+                 selected_pairs_ii(2,population_size), candidate_sorted_ii(2*population_size), &
+                 new_cov(problem_dimension,problem_dimension))
 
         ! initialize population
 !! RASTRIGIN
@@ -88,12 +89,18 @@ contains
         mutation_rate = 1.0_rk - 4.0_rk/real(population_size, kind=rk)
         ! start mutation scale at 1.0, it will vary depending on generational fitness
         mutation_scale = 1.0_rk
+        ! start cov_learning_rate at 0.5, it will vary depending on generational fitness
+        cov_learning_rate = 0.5_rk
+        ! start tournament_k at 2, it will vary depending on generational fitness
+        tournament_k = 2_ik
+        ! restart after catastrophe from this position in ranked fitness
+        catastrophe_pop_start = population_size/2_ik
 
         failed_gen = 0
         ! perform GA loop
         do generation=1,maximum_generations
-            ! tournament selection, K=2
-            call perform_selection(current_population, fitness, selected_pairs_ii, k_opt=2)
+            ! tournament selection
+            call perform_selection(current_population, fitness, selected_pairs_ii, k_opt=tournament_k)
 
             ! store current generation fitness scores
             candidate_fitness(1:population_size) = fitness
@@ -103,7 +110,12 @@ contains
             call apply_constraints(new_population, domain_lb, domain_ub)
 
             ! calculate covariance matrix and Cholesky factor for mutation
-            call covariance(cov, current_population(:,1:population_size/4), reg_vec_opt=regularization_vector)
+            call covariance(new_cov, current_population(:,1:population_size/2), reg_vec_opt=regularization_vector)
+            if (generation > 1) then
+                cov = (1.0_rk - cov_learning_rate)*cov + cov_learning_rate*new_cov
+            else
+                cov = new_cov
+            end if
             call cholesky_decomposition(chol, cov)
 
             ! Gaussian mutation based on post-crossover population genetic covariance
@@ -122,37 +134,55 @@ contains
             fitness = candidate_fitness(1:population_size)
             new_population = candidates(:,candidate_sorted_ii(1:population_size))
 
-            elite_ii = 1
-            write(stdout,'(a,i0,a,f0.6)') 'generation: ',generation,', best fitness: ',fitness(elite_ii)
-            ft_new = fitness(elite_ii)
-
-            if (ft_new < ft) then
-                mutation_scale = max(0.1_rk*mutation_scale, 1.0e-10_rk)
+            ! calculate offspring success = crossover + mutation offspring in population / population size
+            offspring_success = real(count(candidate_sorted_ii(1:population_size) > population_size), kind=rk) / &
+                                real(population_size, kind=rk)
+            if (offspring_success >= 0.5_rk) then
+                cov_learning_rate = min(1.5_rk*cov_learning_rate, 0.9_rk)
+                tournament_k = max(nint(0.9_rk*tournament_k, kind=ik), 2_ik)
                 failed_gen = 0
             else
-                mutation_scale = 2.0_rk*mutation_scale
+                cov_learning_rate = max(0.5_rk*cov_learning_rate, 0.1_rk)
                 failed_gen = failed_gen + 1
             end if
+
+            elite_ii = 1
+            ft_new = fitness(elite_ii)
+            write(stdout,'(a,i0,3(a,f0.6))') 'generation: ',generation, &
+                                             ', best fitness: ',ft_new, &
+                                             ', worst fitness: ',fitness(population_size), &
+                                             ', offspring success: ',offspring_success
+
+            if (ft_new < ft) then
+                mutation_scale = max(0.5_rk*mutation_scale, 1.0e-10_rk)
+            else
+                mutation_scale = 1.5_rk*mutation_scale
+            end if
+
+            if (abs(fitness(1) - fitness(population_size))/fitness(1) < 0.01_ik) failed_gen = huge(1_ik)
 
             if (failed_gen < 50) then
                 ft = ft_new
             else ! elite 1 failing to improve, reset search space
-                chol = 0.0_rk
+                cov = 0.0_rk
                 do concurrent (i=1:problem_dimension)
-                    chol(i,i) = abs(domain_ub(i) - domain_lb(i))/2.0_rk
+                    cov(i,i) = (abs(domain_ub(i) - domain_lb(i))/2.0_rk)**2
                 end do
-                do concurrent (i=population_size/2:population_size)
+                chol = sqrt(cov)
+                do concurrent (i=catastrophe_pop_start:population_size)
                     new_population(:,i) = new_population(:,1)
                 end do
-                call perform_mutation(new_population(:,population_size/2:population_size), 1.0_rk, chol, 1.0_rk)
-                call apply_constraints(new_population(:,population_size/2:population_size), domain_lb, domain_ub)
-                call evaluate_function(new_population(:,population_size/2:population_size), &
-                                       fitness(population_size/2:population_size))
-                total_evals = total_evals + (population_size - population_size/2)
+                call perform_mutation(new_population(:,catastrophe_pop_start:population_size), 1.0_rk, chol, 1.0_rk)
+                call apply_constraints(new_population(:,catastrophe_pop_start:population_size), domain_lb, domain_ub)
+                call evaluate_function(new_population(:,catastrophe_pop_start:population_size), &
+                                       fitness(catastrophe_pop_start:population_size))
+                total_evals = total_evals + (population_size - catastrophe_pop_start + 1)
                 elite_ii = minloc(fitness, dim=1)
-                write(stdout,'(a,i0,a,f0.6)') 'CATASTROPHE generation: ',generation,', best fitness: ',fitness(elite_ii)
                 ft = fitness(elite_ii)
+                write(stdout,'(a,i0,a,f0.6)') 'CATASTROPHE generation: ',generation,', best fitness: ',ft
                 mutation_scale = 1.0_rk ! reset mutation_scale to 1.0 for randomized population
+                cov_learning_rate = 0.5_rk ! reset cov_learning_rate to 0.5 for randomized population
+                tournament_k = 2_ik*tournament_k ! reset tournament_k to 2 for randomized_population
                 failed_gen = 0
             end if
 
