@@ -76,9 +76,11 @@ contains
         ! calculate fitness
         call evaluate_function(current_population, fitness)
         total_evals = size(fitness)
-        elite_ii = minloc(fitness, dim=1)
+        call sort_candidates(fitness, candidate_sorted_ii(1:population_size))
+        current_population = current_population(:,candidate_sorted_ii(1:population_size))
+        elite_ii = 1
         write(stdout,'(a,f0.6)') 'initial best fitness: ',fitness(elite_ii)
-        ft = fitness(1)
+        ft = fitness(elite_ii)
 
         ! set regularization vector very small, just to avoid numerical collapse
         regularization_vector = (1.0e-10_rk)**2
@@ -122,7 +124,7 @@ contains
 
             elite_ii = 1
             write(stdout,'(a,i0,a,f0.6)') 'generation: ',generation,', best fitness: ',fitness(elite_ii)
-            ft_new = fitness(1)
+            ft_new = fitness(elite_ii)
 
             if (ft_new < ft) then
                 mutation_scale = max(0.1_rk*mutation_scale, 1.0e-10_rk)
@@ -132,7 +134,7 @@ contains
                 failed_gen = failed_gen + 1
             end if
 
-            if (failed_gen < 10) then
+            if (failed_gen < 50) then
                 ft = ft_new
             else ! elite 1 failing to improve, reset search space
                 chol = 0.0_rk
@@ -149,7 +151,7 @@ contains
                 total_evals = total_evals + (population_size - population_size/2)
                 elite_ii = minloc(fitness, dim=1)
                 write(stdout,'(a,i0,a,f0.6)') 'CATASTROPHE generation: ',generation,', best fitness: ',fitness(elite_ii)
-                ft = sum(fitness)
+                ft = fitness(elite_ii)
                 mutation_scale = 1.0_rk ! reset mutation_scale to 1.0 for randomized population
                 failed_gen = 0
             end if
@@ -175,8 +177,8 @@ use benchmark
 implicit none
 
     integer(ik), parameter :: problem_dimension   = 200
-    integer(ik), parameter :: population_size     = 4000
-    integer(ik), parameter :: maximum_generations = 4 * 250
+    integer(ik), parameter :: population_size     = 2500
+    integer(ik), parameter :: maximum_generations = 4000
 
     call solve(problem_dimension, population_size, maximum_generations)
 
