@@ -12,35 +12,63 @@ public :: cov, chol, constraints_reflective_boundary, sort
 
 contains
 
-    pure subroutine cov(c, x, x_avg_opt, reg_vec_opt)
+    pure subroutine cov(c, x, x_avg_opt, reg_vec_opt, weights_opt)
         real(kind=sp), intent(in) :: x(:,:)
         real(kind=sp), intent(out) :: c(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
-        real(kind=sp), intent(in), optional :: x_avg_opt(:), reg_vec_opt(:)
+        real(kind=sp), intent(in), optional :: x_avg_opt(:), reg_vec_opt(:), weights_opt(:)
         real(kind=dp) :: x_avg(size(x, dim=1, kind=i64)), x_centered(size(x, dim=1, kind=i64),size(x, dim=2, kind=i64)), &
-                         c_dp(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64)), inv_n, inv_n_1
+                         c_dp(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64)), inv_n_1, &
+                         weights(size(x, dim=2, kind=i64))
         integer(kind=i32) :: nx, i
         call debug_error_condition(size(x,dim=2,kind=i64) > huge(1_i32), &
                                    'UTIL::COV sample x matrix too large for i32 storage')
         call debug_error_condition(size(x,dim=2) < 2_i32, &
                                    'UTIL::COV covariance matrix calculation requires >= 2 samples')
         nx = size(x, dim=2)
+        ! 1. Assign and normalize weights
+        if (present(weights_opt)) then
+            call debug_error_condition(size(weights_opt) /= nx, &
+                                       'UTIL::COV weights vector size does not match sample count')
+            weights = real(weights_opt, kind=dp)
+            if (sum(weights) > 0.0_dp) then
+                weights = weights / sum(weights)
+            else
+                weights = 1.0_dp / real(nx, kind=dp)
+            end if
+        else
+            weights = 1.0_dp / real(nx, kind=dp)
+        end if
+        ! 2. Calculate average (weighted or standard)
         if (present(x_avg_opt)) then
             call debug_error_condition(size(x_avg_opt) /= size(x,dim=1), &
                                        'UTIL::COV average x vector size does not match sample x matrix')
             x_avg = real(x_avg_opt, kind=dp)
         else
-            inv_n = 1.0_dp/real(nx, kind=dp)
             x_avg = 0.0_dp
             do i=1_i32,nx
-                x_avg = x_avg + real(x(:,i), kind=dp)
+                x_avg = x_avg + real(x(:,i), kind=dp) * weights(i)
             end do
-            x_avg = x_avg*inv_n
         end if
+        ! 3. Center the data
         do concurrent (i=1_i32:nx)
             x_centered(:,i) = real(x(:,i), kind=dp) - x_avg
         end do
-        inv_n_1 = 1.0_dp/real(nx - 1_i32, kind=dp)
-        c_dp = matmul(x_centered, transpose(x_centered))*inv_n_1
+        ! 4. Calculate covariance matrix
+        if (present(weights_opt)) then
+            block
+                real(kind=dp) :: x_weighted(size(x, dim=1, kind=i64), size(x, dim=2, kind=i64))
+                do concurrent (i=1_i32:nx)
+                    x_weighted(:,i) = x_centered(:,i) * weights(i)
+                end do
+                c_dp = matmul(x_weighted, transpose(x_centered))
+            end block
+        else
+            ! Standard (N-1) sample covariance fallback when no weights are provided
+            inv_n_1 = 1.0_dp / real(nx - 1_i32, kind=dp)
+            c_dp = matmul(x_centered, transpose(x_centered)) * inv_n_1
+        end if
+        
+        ! 5. Add regularization
         if (present(reg_vec_opt)) then
             do concurrent (i=1_i32:size(c_dp, dim=1))
                 c_dp(i,i) = c_dp(i,i) + real(reg_vec_opt(i), kind=dp)
@@ -48,6 +76,54 @@ contains
         end if
         c = real(c_dp, kind=sp)
     end subroutine cov
+
+!    pure subroutine cov(c, x, x_avg_opt, reg_vec_opt, weights_opt)
+!        real(kind=sp), intent(in) :: x(:,:)
+!        real(kind=sp), intent(out) :: c(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64))
+!        real(kind=sp), intent(in), optional :: x_avg_opt(:), reg_vec_opt(:), weights_opt(:)
+!        real(kind=dp) :: x_avg(size(x, dim=1, kind=i64)), x_centered(size(x, dim=1, kind=i64),size(x, dim=2, kind=i64)), &
+!                         c_dp(size(x, dim=1, kind=i64),size(x, dim=1, kind=i64)), inv_n, inv_n_1, &
+!                         weights(size(weights_opt, kind=i64))
+!        integer(kind=i32) :: nx, i
+!        call debug_error_condition(size(x,dim=2,kind=i64) > huge(1_i32), &
+!                                   'UTIL::COV sample x matrix too large for i32 storage')
+!        call debug_error_condition(size(x,dim=2) < 2_i32, &
+!                                   'UTIL::COV covariance matrix calculation requires >= 2 samples')
+!        nx = size(x, dim=2)
+!        if (present(weights_opt) then
+!            weights = real(weights_opt, kind=dp)
+!            if (sum(weights) > 0.0_dp) then
+!                weights = weights/sum(weights)
+!            else
+!                weights = 1.0_dp/real(nx, kind=dp)
+!            end if
+!        else
+!            weights = 1.0_dp/real(nx, kind=dp)
+!        end if
+!        if (present(x_avg_opt)) then
+!            call debug_error_condition(size(x_avg_opt) /= size(x,dim=1), &
+!                                       'UTIL::COV average x vector size does not match sample x matrix')
+!            x_avg = real(x_avg_opt, kind=dp)
+!        else
+!            inv_n = 1.0_dp/real(nx, kind=dp)
+!            x_avg = 0.0_dp
+!            do i=1_i32,nx
+!                x_avg = x_avg + real(x(:,i), kind=dp)*weights(i)
+!            end do
+!            x_avg = x_avg*inv_n
+!        end if
+!        do concurrent (i=1_i32:nx)
+!            x_centered(:,i) = real(x(:,i), kind=dp) - x_avg
+!        end do
+!        inv_n_1 = 1.0_dp/real(nx - 1_i32, kind=dp)
+!        c_dp = matmul(x_centered, transpose(x_centered))*inv_n_1
+!        if (present(reg_vec_opt)) then
+!            do concurrent (i=1_i32:size(c_dp, dim=1))
+!                c_dp(i,i) = c_dp(i,i) + real(reg_vec_opt(i), kind=dp)
+!            end do
+!        end if
+!        c = real(c_dp, kind=sp)
+!    end subroutine cov
 
     pure subroutine chol(l, a)
         real(kind=sp), intent(in) :: a(:,:)
