@@ -13,7 +13,16 @@ public :: stdout, ik, rk
 public :: twopi
 public :: covariance, cholesky_decomposition, sort_candidates, apply_constraints, random_uniform
 public :: perform_selection, perform_crossover, perform_mutation
-public :: rastrigin, rosenbrock
+public :: rastrigin, rosenbrock, griewank, styblinski_tang
+public :: real_valued_function
+    abstract interface
+        pure subroutine real_valued_function(x, fx)
+        import rk
+        implicit none
+            real(rk), intent(in) :: x(:,:)
+            real(rk), intent(out) :: fx(:)
+        end subroutine real_valued_function
+    end interface
 contains
     pure subroutine rastrigin(x, fx)
         real(rk), intent(in) :: x(:,:)
@@ -35,13 +44,33 @@ contains
             fx(i) = sum(100.0_rk*(x(2:xdim,i) - x(1:xdim-1,i)**2)**2 + (1.0_rk - x(1:xdim-1,i))**2, dim=1)
         end do
     end subroutine rosenbrock
+    pure subroutine griewank(x, fx)
+        real(rk), intent(in) :: x(:,:)
+        real(rk), intent(out) :: fx(:)
+        integer :: i, xdim, nx
+        xdim = size(x, dim=1)
+        nx = size(x, dim=2)
+        do concurrent (i=1:nx)
+            fx(i) = 1.0_rk/4000.0_rk*sum(x(:,i)**2, dim=1) - product(cos(x(:,i)/sqrt(real(i, kind=rk)))) + 1.0_rk
+        end do
+    end subroutine griewank
+    pure subroutine styblinski_tang(x, fx)
+        real(rk), intent(in) :: x(:,:)
+        real(rk), intent(out) :: fx(:)
+        integer :: i, xdim, nx
+        xdim = size(x, dim=1)
+        nx = size(x, dim=2)
+        do concurrent (i=1:nx)
+            fx(i) = 0.5_rk*sum(x(:,i)**4 - 16.0_rk*x(:,i)**2 + 5.0_rk*x(:,i), dim=1)
+        end do
+    end subroutine styblinski_tang
 end module ga_interface                                                           
 
 module benchmark
-use, non_intrinsic :: ga_interface, evaluate_function=>rastrigin
+use, non_intrinsic :: ga_interface
 implicit none
 private
-public :: ik, solve
+public :: ik, rk, solve, real_valued_function, rastrigin, rosenbrock, griewank, styblinski_tang
 
     logical, parameter :: print_matrix_enabled = .false.
 
@@ -57,9 +86,10 @@ contains
         end do
     end subroutine print_matrix
 
-    impure subroutine solve(problem_dimension, population_size, maximum_generations)
-        integer(ik), intent(in) :: problem_dimension, population_size, maximum_generations
-        real(rk), allocatable :: fitness(:), cov(:,:), chol(:,:), baseline(:,:), baseline_fitness(:), domain_lb(:), domain_ub(:), &
+    impure subroutine solve(evaluate_function, target_value, domain_lb, domain_ub)
+        procedure(real_valued_function) :: evaluate_function
+        real(rk), intent(in) :: target_value, domain_lb(:), domain_ub(:)
+        real(rk), allocatable :: fitness(:), cov(:,:), chol(:,:), baseline(:,:), baseline_fitness(:), &
                                  regularization_vector(:), candidates(:,:), candidate_fitness(:), new_cov(:,:), cov_weights(:)
         real(rk), allocatable, target :: pop1(:,:), pop2(:,:)
         real(rk), pointer :: current_population(:,:), new_population(:,:), dummy_ptr(:,:)
@@ -68,22 +98,21 @@ contains
                     mutation_scale0, mutation_scale_min, mutation_scale_max, &
                     cov_learning_rate0, cov_learning_rate_min, cov_learning_rate_max
         integer(ik), allocatable :: selected_pairs_ii(:,:), candidate_sorted_ii(:)
-        integer(ik) :: generation, elite_ii, i, total_evals, tournament_k, catastrophe_pop_start, catastrophe_count
+        integer(ik) :: generation, elite_ii, i, total_evals, tournament_k, catastrophe_pop_start, catastrophe_count, &
+                       problem_dimension, population_size, maximum_generations
         logical :: population_ok
+
+        problem_dimension = size(domain_lb)
+        population_size = 10_ik*problem_dimension
+        maximum_generations = int(1000000.0_rk/real(population_size, kind=rk), kind=ik)
 
         !allocate arrays
         allocate(fitness(population_size), cov(problem_dimension,problem_dimension), chol(problem_dimension,problem_dimension), &
-                 domain_lb(problem_dimension), domain_ub(problem_dimension), regularization_vector(problem_dimension), &
+                 regularization_vector(problem_dimension), &
                  candidates(problem_dimension,2*population_size), candidate_fitness(2*population_size), &
                  pop1(problem_dimension,population_size), pop2(problem_dimension,population_size), &
                  selected_pairs_ii(2,population_size), candidate_sorted_ii(2*population_size), &
                  new_cov(problem_dimension,problem_dimension), cov_weights(population_size))
-!! RASTRIGIN
-        domain_lb = -5.12_rk
-        domain_ub = 5.12_rk
-!!! ROSENBROCK
-!        domain_lb = -5.0_rk
-!        domain_ub = 10.0_rk
 
         ! initialize population
         call random_uniform(pop1, size(pop1), minval(domain_lb), maxval(domain_ub))
@@ -92,6 +121,7 @@ contains
 
         ! calculate fitness
         call evaluate_function(current_population, fitness)
+        fitness = abs(target_value - fitness)
         total_evals = size(fitness)
         call sort_candidates(fitness, candidate_sorted_ii(1:population_size))
         current_population = current_population(:,candidate_sorted_ii(1:population_size))
@@ -169,6 +199,7 @@ contains
 
             ! calculate fitness
             call evaluate_function(new_population, fitness)
+            fitness = abs(target_value - fitness)
             total_evals = total_evals + size(fitness)
 
             ! store current_population and new_population into candidate_population(2*population_size), then keep top half
@@ -252,6 +283,7 @@ contains
         allocate(baseline(problem_dimension,total_evals), baseline_fitness(total_evals))
         call random_uniform(baseline, size(baseline), minval(domain_lb), maxval(domain_ub))
         call evaluate_function(baseline, baseline_fitness)
+        fitness = abs(target_value - fitness)
         elite_ii = minloc(baseline_fitness, dim=1)
         write(stdout,'(a,f0.6,a,i0,a)') 'baseline best fitness: ',baseline_fitness(elite_ii),' (',total_evals,' evaluations)'
     end subroutine solve
@@ -262,10 +294,57 @@ program main
 use benchmark
 implicit none
 
-    integer(ik), parameter :: problem_dimension   = 10
-    integer(ik), parameter :: population_size     = problem_dimension*100
-    integer(ik), parameter :: maximum_generations = nint(1000000.0/population_size)
+    integer(ik), parameter :: k_test_functions = 4
+    integer(ik), parameter :: d_dimension_list(*) = [2_ik, 10_ik, 20_ik, 100_ik, 200_ik]
 
-    call solve(problem_dimension, population_size, maximum_generations)
+    procedure(real_valued_function), pointer :: test_function
+    character(len=:), allocatable :: fname
+    real(rk) :: target_value
+    real(rk), allocatable :: domain_lb(:), domain_ub(:)
+    integer(ik) :: k, d_ii, d
+
+    do d_ii=1_ik,size(d_dimension_list)
+        d = d_dimension_list(d_ii)
+        if (allocated(domain_lb)) deallocate(domain_lb)
+        if (allocated(domain_ub)) deallocate(domain_ub)
+        allocate(domain_lb(d), domain_ub(d))
+        do k=1_ik,k_test_functions
+            select case (k)
+                case (1)
+                    test_function => rastrigin
+                    fname = 'Rastrigin'
+                    target_value = 0.0_rk
+                    domain_lb = -5.12_rk
+                    domain_ub = 5.12_rk
+                case (2)
+                    test_function => rosenbrock
+                    fname = 'Rosenbrock'
+                    target_value = 0.0_rk
+                    domain_lb = -5.0_rk
+                    domain_ub = 10.0_rk
+                case (3)
+                    test_function => griewank
+                    fname = 'Griewank'
+                    target_value = 0.0_rk
+                    domain_lb = 100.0_rk
+                    domain_ub = 100.0_rk
+                case (4)
+                    test_function => styblinski_tang
+                    fname = 'Styblinski-Tang'
+                    target_value = -39.166165_rk*real(d, kind=rk)
+                    domain_lb = -5.0_rk
+                    domain_ub = 5.0_rk
+                case default
+                    write(*,*) 'valid test functions are:'
+                    write(*,*) ' 1. Rastrigin'
+                    write(*,*) ' 2. Rosenbrock'
+                    write(*,*) ' 3. Griewank'
+                    write(*,*) ' 4. Styblinski-Tang'
+                    error stop 'only 4 test functions have been implemented'
+            end select
+            write(*,'(a,f0.6,a,i0,a,f0.2,a,f0.2,a)') &
+                 fname//' looking for ',target_value,' on ',d,' dimensions [',minval(domain_lb),', ',maxval(domain_ub),']'
+        end do
+    end do
 
 end program main
