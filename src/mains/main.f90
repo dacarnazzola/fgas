@@ -72,8 +72,8 @@ implicit none
 private
 public :: stdout, ik, rk, solve, real_valued_function, rastrigin, rosenbrock, griewank, styblinski_tang
 
-    logical, parameter :: print_matrix_enabled = .false., printing = .true.
-    integer(ik), parameter :: catastrophe_limit = huge(1_ik)
+    logical, parameter :: print_matrix_enabled = .false.
+    integer(ik), parameter :: catastrophe_limit = 10_ik
 
 contains
 
@@ -87,9 +87,11 @@ contains
         end do
     end subroutine print_matrix
 
-    impure subroutine solve(evaluate_function, target_value, domain_lb, domain_ub)
+    impure subroutine solve(evaluate_function, target_value, domain_lb, domain_ub, eval_budget, printing_opt)
         procedure(real_valued_function) :: evaluate_function
         real(rk), intent(in) :: target_value, domain_lb(:), domain_ub(:)
+        integer(ik), intent(in) :: eval_budget
+        logical, intent(in), optional :: printing_opt
         real(rk), allocatable :: fitness(:), cov(:,:), chol(:,:),  &
                                  regularization_vector(:), candidates(:,:), candidate_fitness(:), new_cov(:,:), cov_weights(:)
         real(rk), allocatable, target :: pop1(:,:), pop2(:,:)
@@ -101,11 +103,17 @@ contains
         integer(ik), allocatable :: selected_pairs_ii(:,:), candidate_sorted_ii(:)
         integer(ik) :: generation, i, total_evals, tournament_k, catastrophe_pop_start, catastrophe_count, &
                        problem_dimension, population_size, maximum_generations
-        logical :: population_ok
+        logical :: population_ok, printing
+
+        if (present(printing_opt)) then
+            printing = printing_opt
+        else
+            printing = .false.
+        end if
 
         problem_dimension = size(domain_lb)
         population_size = 10_ik + 10_ik*problem_dimension
-        maximum_generations = int(1000000.0_rk/real(population_size, kind=rk), kind=ik)
+        maximum_generations = 100_ik ! int(real(eval_budget, kind=rk)/real(population_size, kind=rk), kind=ik)
 
         !allocate arrays
         allocate(fitness(population_size), cov(problem_dimension,problem_dimension), chol(problem_dimension,problem_dimension), &
@@ -135,7 +143,7 @@ contains
         end if
 
         ! set regularization vector very small, just to avoid numerical collapse
-        regularization_vector = (1.0e-10_rk)**2
+        regularization_vector = epsilon(1.0_rk)
 
         ! set mutation rate as 1.0 - 4.0/population_size, enabling high mutation rate for populations 10+
         mutation_rate = 0.1_rk ! 1.0_rk - 4.0_rk/real(population_size, kind=rk)
@@ -192,10 +200,10 @@ contains
             call apply_constraints(new_population, domain_lb, domain_ub)
 
             ! Gaussian mutation based on post-crossover population genetic covariance
-            chol = 0.0_rk
-            do concurrent (i=1_ik:problem_dimension)
-                chol(i,i) = domain_ub(i) - domain_lb(i)
-            end do
+!            chol = 0.0_rk
+!            do concurrent (i=1_ik:problem_dimension)
+!                chol(i,i) = domain_ub(i) - domain_lb(i)
+!            end do
             call perform_mutation(new_population, mutation_rate, chol, mutation_scale)
             call apply_constraints(new_population, domain_lb, domain_ub)
 
@@ -262,14 +270,17 @@ contains
                 cov = 2.0_rk*cov ! double covariance to help crossover search
                 mutation_scale = mutation_scale0 ! reset mutation_scale to 0.5
                 cov_learning_rate = cov_learning_rate_min ! reset cov_learning_rate to 0.01, prevent immediate collapse
-                tournament_k = tournament_k + 1_ik ! increase tournament size to increase selection pressure
+!                tournament_k = tournament_k + 1_ik ! increase tournament size to increase selection pressure
                 do concurrent (i=2_ik:population_size)
                     new_population(:,i) = new_population(:,1_ik)
                 end do
                 call perform_mutation(new_population(:,2:population_size), 1.0_rk, chol, mutation_scale) ! copy + mutate elite 1
 
                 catastrophe_count = catastrophe_count + 1_ik
-                if (catastrophe_count > catastrophe_limit) error stop 'death doom loop'
+                if (catastrophe_count > catastrophe_limit) then
+!                    error stop 'death doom loop'
+                    exit
+                end if
             end if
 
             ! exit if converged
@@ -283,7 +294,7 @@ contains
             current_population => new_population
             new_population => dummy_ptr
         end do
-        write(stdout,*) '  value: ',current_fitness_stats(1),', evaluations: ',total_evals
+        write(stdout,*) '  |error from target| = ',current_fitness_stats(1),', evaluations = ',total_evals
     end subroutine solve
 
 end module benchmark
@@ -342,8 +353,10 @@ implicit none
             end select
             write(stdout,'(a,f0.6,a,i0,a,f0.2,a,f0.2,a)') &
                  fname//' looking for ',target_value,' on ',d,' dimensions [',minval(domain_lb),', ',maxval(domain_ub),']'
-            call solve(test_function, target_value, domain_lb, domain_ub)
+!            call solve(test_function, target_value, domain_lb, domain_ub, 1000000_ik, printing_opt = .false.)
+            call solve(test_function, target_value, domain_lb, domain_ub, 1000000_ik, printing_opt = .true.)
         end do
+        write(stdout,*) ''
     end do
 
 end program main
