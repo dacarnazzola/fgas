@@ -2,7 +2,7 @@ module ga_interface
 use, non_intrinsic :: kinds, only: stdout, ik=>i32, rk=>sp
 use, non_intrinsic :: constants, only: twopi=>twopi_sp
 use, non_intrinsic :: util, only: covariance=>cov, cholesky_decomposition=>chol, sort_candidates=>sort, &
-                                  apply_constraints=>constraints_reflective_boundary
+                                  apply_constraints=>constraints_reflective_boundary, stdev=>std
 use, non_intrinsic :: random, only: random_uniform=>random_uniform_sp
 use, non_intrinsic :: selection, only: perform_selection=>selection_tournament
 use, non_intrinsic :: crossover, only: perform_crossover=>crossover_fitness_weighted_gaussian_blend
@@ -11,7 +11,7 @@ implicit none
 private
 public :: stdout, ik, rk
 public :: twopi
-public :: covariance, cholesky_decomposition, sort_candidates, apply_constraints, random_uniform
+public :: covariance, cholesky_decomposition, sort_candidates, apply_constraints, stdev, random_uniform
 public :: perform_selection, perform_crossover, perform_mutation
 public :: rastrigin, rosenbrock, griewank, styblinski_tang
 public :: real_valued_function
@@ -93,16 +93,17 @@ contains
         integer(ik), intent(in) :: eval_budget
         logical, intent(in), optional :: printing_opt
         real(rk), allocatable :: fitness(:), cov(:,:), chol(:,:),  &
-                                 regularization_vector(:), candidates(:,:), candidate_fitness(:), new_cov(:,:), cov_weights(:)
+                                 regularization_vector(:), candidate_population(:,:), candidate_fitness(:), &
+                                 new_cov(:,:), cov_weights(:), draw_vs_t(:)
         real(rk), allocatable, target :: pop1(:,:), pop2(:,:)
         real(rk), pointer :: current_population(:,:), new_population(:,:), dummy_ptr(:,:)
-        real(rk) :: mutation_rate, mutation_scale, cov_learning_rate, offspring_success, chol_fac, &
+        real(rk) :: mutation_rate, mutation_scale, cov_learning_rate, offspring_success_rate, chol_fac, &
                     current_fitness_stats(4), new_fitness_stats(4), & ! best, median, worst, average
                     mutation_scale0, mutation_scale_min, mutation_scale_max, &
-                    cov_learning_rate0, cov_learning_rate_min, cov_learning_rate_max
+                    cov_learning_rate0, cov_learning_rate_min, cov_learning_rate_max, t_use
         integer(ik), allocatable :: selected_pairs_ii(:,:), candidate_sorted_ii(:)
         integer(ik) :: generation, i, total_evals, tournament_k, catastrophe_pop_start, catastrophe_count, &
-                       problem_dimension, population_size, maximum_generations
+                       problem_dimension, population_size, maximum_generations, offspring_success
         logical :: population_ok, printing
 
         if (present(printing_opt)) then
@@ -113,18 +114,18 @@ contains
 
         problem_dimension = size(domain_lb)
         population_size = 10_ik + 10_ik*problem_dimension
-        maximum_generations = 100_ik ! int(real(eval_budget, kind=rk)/real(population_size, kind=rk), kind=ik)
+        maximum_generations = int(real(eval_budget, kind=rk)/real(population_size, kind=rk), kind=ik)
 
         !allocate arrays
         allocate(fitness(population_size), cov(problem_dimension,problem_dimension), chol(problem_dimension,problem_dimension), &
-                 regularization_vector(problem_dimension), &
-                 candidates(problem_dimension,2*population_size), candidate_fitness(2*population_size), &
+                 regularization_vector(problem_dimension), draw_vs_t(population_size), &
+                 candidate_population(problem_dimension,2*population_size), candidate_fitness(2*population_size), &
                  pop1(problem_dimension,population_size), pop2(problem_dimension,population_size), &
                  selected_pairs_ii(2,population_size), candidate_sorted_ii(2*population_size), &
                  new_cov(problem_dimension,problem_dimension), cov_weights(population_size))
 
         ! initialize population
-        call random_uniform(pop1, size(pop1), minval(domain_lb), maxval(domain_ub))
+        call random_uniform(pop1, size(pop1, kind=ik), minval(domain_lb), maxval(domain_ub))
         current_population => pop1
         new_population => pop2
 
@@ -146,7 +147,7 @@ contains
         regularization_vector = epsilon(1.0_rk)
 
         ! set mutation rate as 1.0 - 4.0/population_size, enabling high mutation rate for populations 10+
-        mutation_rate = 0.1_rk ! 1.0_rk - 4.0_rk/real(population_size, kind=rk)
+        mutation_rate = 0.8_rk ! 1.0_rk - 4.0_rk/real(population_size, kind=rk)
 
         ! start mutation scale at 1.0, it will vary depending on generational fitness
         mutation_scale0 = (1.0_rk/6.0_rk)/sqrt(real(problem_dimension, kind=rk))
@@ -189,6 +190,9 @@ contains
 
             ! store current generation fitness scores
             candidate_fitness(1:population_size) = fitness
+            ! standard deviation of current generation fitness will be used as gating temperature
+            call stdev(fitness, t_use)
+            t_use = max(t_use, epsilon(1.0_rk))
 
             ! fitness-weighted crossover with Gaussian blend
             chol_fac = 0.0_rk
@@ -200,10 +204,10 @@ contains
             call apply_constraints(new_population, domain_lb, domain_ub)
 
             ! Gaussian mutation based on post-crossover population genetic covariance
-!            chol = 0.0_rk
-!            do concurrent (i=1_ik:problem_dimension)
-!                chol(i,i) = domain_ub(i) - domain_lb(i)
-!            end do
+            chol = 0.0_rk
+            do concurrent (i=1_ik:problem_dimension)
+                chol(i,i) = domain_ub(i) - domain_lb(i)
+            end do
             call perform_mutation(new_population, mutation_rate, chol, mutation_scale)
             call apply_constraints(new_population, domain_lb, domain_ub)
 
@@ -213,12 +217,34 @@ contains
             total_evals = total_evals + size(fitness)
 
             ! store current_population and new_population into candidate_population(2*population_size), then keep top half
-            candidates(:,1:population_size) = current_population
-            candidates(:,population_size+1:2*population_size) = new_population
+            candidate_population(:,1:population_size) = current_population
+            candidate_population(:,population_size+1:2*population_size) = new_population
             candidate_fitness(population_size+1:2*population_size) = fitness
-            call sort_candidates(candidate_fitness, candidate_sorted_ii)
-            fitness = candidate_fitness(1:population_size)
-            new_population = candidates(:,candidate_sorted_ii(1:population_size))
+!!            call sort_candidates(candidate_fitness, candidate_sorted_ii)
+!!            fitness = candidate_fitness(1:population_size)
+!!            new_population = candidate_population(:,candidate_sorted_ii(1:population_size))
+            call random_uniform(draw_vs_t, size(draw_vs_t, kind=ik), 0.0_rk, 1.0_rk)
+            offspring_success = 0_ik
+            do concurrent (i=1_ik:population_size)
+                if (fitness(i) < current_fitness_stats(1)) then
+                    new_population(:,i) = candidate_population(:,population_size+i)
+                    offspring_success = offspring_success + 1_ik
+                else
+                    if (draw_vs_t(i) < exp((current_fitness_stats(1) - fitness(i))/t_use)) then
+                        new_population(:,i) = candidate_population(:,population_size+i)
+                        offspring_success = offspring_success + 1_ik
+                    else
+                        new_population(:,i) = candidate_population(:,i)
+                        fitness(i) = candidate_fitness(i)
+                    end if
+                end if
+            end do
+            if (minval(candidate_fitness) < minval(fitness)) then
+                new_population(:,maxloc(fitness)) = candidate_population(:,minloc(candidate_fitness))
+                fitness(maxloc(fitness)) = candidate_fitness(minloc(candidate_fitness))
+            end if
+            call sort_candidates(fitness, candidate_sorted_ii(1_ik:population_size))
+            new_population = new_population(:,candidate_sorted_ii(1_ik:population_size))
 
             new_fitness_stats = [fitness(1), &
                                  fitness(population_size/2_ik), &
@@ -226,11 +252,12 @@ contains
                                  sum(fitness)/real(population_size, kind=rk)]
 
             ! calculate offspring success = crossover + mutation offspring in population / population size
-            offspring_success = real(count(candidate_sorted_ii(1:population_size) > population_size), kind=rk) / &
-                                real(population_size, kind=rk)
+!!            offspring_success = count(candidate_sorted_ii(1:population_size) > population_size)
+            offspring_success_rate = real(offspring_success, kind=rk) / &
+                                     real(population_size, kind=rk)
 
             ! ~18.4% is optimal for some valley function, ~20% standard to balance convergence speed while not overshooting
-            if (offspring_success >= 0.2_rk) then
+            if (offspring_success_rate >= 0.2_rk) then
                 cov_learning_rate = min(1.5_rk*cov_learning_rate, cov_learning_rate_max)
                 tournament_k = max(tournament_k - 1_ik, 2_ik)
             else
@@ -248,7 +275,7 @@ contains
             if (printing) then
                 write(stdout,'(a,i0,4(a,f0.6))') '  generation: ',generation, &
                                                  ', best fitness: ',new_fitness_stats(1), &
-                                                 ', offspring success: ',offspring_success, &
+                                                 ', offspring success rate: ',offspring_success_rate, &
                                                  ', cov learning rate: ',cov_learning_rate, &
                                                  ', mutation scale: ',mutation_scale
             end if
@@ -304,7 +331,8 @@ use benchmark
 implicit none
 
     integer(ik), parameter :: k_test_functions = 4
-    integer(ik), parameter :: d_dimension_list(*) = [2_ik, 10_ik, 20_ik, 100_ik, 200_ik]
+    integer(ik), parameter :: d_dimension_list(*) = [20_ik] ! [2_ik, 10_ik, 20_ik, 100_ik, 200_ik]
+    integer(ik), parameter :: eval_budget = 1000000_ik
 
     procedure(real_valued_function), pointer :: test_function
     character(len=:), allocatable :: fname
@@ -353,8 +381,8 @@ implicit none
             end select
             write(stdout,'(a,f0.6,a,i0,a,f0.2,a,f0.2,a)') &
                  fname//' looking for ',target_value,' on ',d,' dimensions [',minval(domain_lb),', ',maxval(domain_ub),']'
-!            call solve(test_function, target_value, domain_lb, domain_ub, 1000000_ik, printing_opt = .false.)
-            call solve(test_function, target_value, domain_lb, domain_ub, 1000000_ik, printing_opt = .true.)
+!            call solve(test_function, target_value, domain_lb, domain_ub, eval_budget, printing_opt = .false.)
+            call solve(test_function, target_value, domain_lb, domain_ub, eval_budget, printing_opt = .true.)
         end do
         write(stdout,*) ''
     end do

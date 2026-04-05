@@ -3,7 +3,7 @@ use, non_intrinsic :: kinds, only: i32, i64, sp, dp
 use, non_intrinsic :: system, only: debug_error_condition
 implicit none
 private
-public :: cov, chol, constraints_reflective_boundary, sort
+public :: cov, chol, constraints_reflective_boundary, sort, std
 
     interface sort
         module procedure :: sort_sp
@@ -11,6 +11,16 @@ public :: cov, chol, constraints_reflective_boundary, sort
     end interface sort
 
 contains
+
+    pure subroutine std(x, s)
+        real(kind=sp), intent(in) :: x(:)
+        real(kind=sp), intent(out) :: s
+        real(kind=dp) :: x_dp(size(x, kind=i64)), xavg, inv_nx_1
+        x_dp = real(x, kind=dp)
+        xavg = sum(x_dp)/real(size(x_dp, kind=i64), kind=dp)
+        inv_nx_1 = 1.0_dp/real(size(x, kind=i64) - 1_i64, kind=dp)
+        s = real(sum(inv_nx_1*(x_dp - xavg)**2), kind=sp)
+    end subroutine std
 
     pure subroutine cov(c, x, x_avg_opt, reg_vec_opt, weights_opt)
         real(kind=sp), intent(in) :: x(:,:)
